@@ -248,9 +248,11 @@ function createScenery (game) {
   addGroundScenery(game, tileX(19), 'mountain1', tileSize(4))
   addGroundScenery(game, tileX(25), 'bush2', tileSize(3))
 
-  addGroundScenery(game, tileX(36), 'mountain2', tileSize(5))
+  // Background hills sit in the gaps between the pipes (tiles 29/38/46/57)
+  // so they never overlap a pipe and make it look crooked.
+  addGroundScenery(game, tileX(32), 'mountain2', tileSize(5))
   addGroundScenery(game, tileX(48), 'bush1', tileSize(6))
-  addGroundScenery(game, tileX(54), 'mountain1', tileSize(4))
+  addGroundScenery(game, tileX(41), 'mountain1', tileSize(4))
   addGroundScenery(game, tileX(62), 'bush2', tileSize(3))
   addGroundScenery(game, tileX(83), 'bush1', tileSize(5))
 
@@ -1168,18 +1170,38 @@ function killMario (game) {
   mario.isDead = true
   mario.anims.play('mario-dead')
   mario.setCollideWorldBounds(false)
-
-  playAudio('gameover', game, { volume: 0.05 })
-
   mario.body.checkCollision.none = true
   mario.setVelocityX(0)
 
-  game.time.delayedCall(100, () => {
-    mario.setVelocityY(-250)
+  playAudio('gameover', game, { volume: 0.05 })
+
+  // The whole scene freezes during the death, like the original
+  freezeEnemies(game)
+
+  // If Mario already dropped off the bottom of the screen (a pit), he just keeps
+  // falling — no hop. Otherwise: hold the death pose, then hop up and fall through.
+  if (mario.y >= GAME_HEIGHT) {
+    game.time.delayedCall(1400, () => loseLife(game))
+    return
+  }
+
+  mario.setVelocityY(0)
+  mario.body.allowGravity = false
+
+  game.time.delayedCall(500, () => {
+    mario.body.allowGravity = true
+    mario.setVelocityY(-300)
   })
 
-  game.time.delayedCall(1400, () => {
-    loseLife(game)
+  game.time.delayedCall(1900, () => loseLife(game))
+}
+
+function freezeEnemies (game) {
+  if (!game.enemies) return
+
+  game.enemies.getChildren().forEach((enemy) => {
+    if (enemy.body) enemy.setVelocity(0, 0)
+    if (enemy.anims) enemy.anims.pause()
   })
 }
 
