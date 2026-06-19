@@ -248,9 +248,11 @@ function createScenery (game) {
   addGroundScenery(game, tileX(19), 'mountain1', tileSize(4))
   addGroundScenery(game, tileX(25), 'bush2', tileSize(3))
 
-  addGroundScenery(game, tileX(36), 'mountain2', tileSize(5))
+  // Background hills sit in the gaps between the pipes (tiles 29/38/46/57)
+  // so they never overlap a pipe and make it look crooked.
+  addGroundScenery(game, tileX(32), 'mountain2', tileSize(5))
   addGroundScenery(game, tileX(48), 'bush1', tileSize(6))
-  addGroundScenery(game, tileX(54), 'mountain1', tileSize(4))
+  addGroundScenery(game, tileX(41), 'mountain1', tileSize(4))
   addGroundScenery(game, tileX(62), 'bush2', tileSize(3))
   addGroundScenery(game, tileX(83), 'bush1', tileSize(5))
 
@@ -488,34 +490,53 @@ function createEnemies (game) {
   addGoomba(game, tileX(160))
   addGoomba(game, tileX(174))
 
-  // A single green Koopa Troopa, like the original level
+  // Two green Koopa Troopas
   addKoopa(game, tileX(100))
+  addKoopa(game, tileX(150))
 }
 
 function addGoomba (game, x) {
-  const enemy = game.enemies
-    .create(x, GROUND_Y, 'goomba')
-    .setOrigin(0, 1)
-    .setGravityY(300)
-    .setVelocityX(-35)
-    .setDepth(4)
-
-  enemy.enemyType = 'goomba'
-  enemy.anims.play('goomba-walk', true)
-  return enemy
+  return spawnEnemy(game, x, 'goomba', 'goomba-walk', -35)
 }
 
 function addKoopa (game, x) {
+  return spawnEnemy(game, x, 'koopa', 'koopa-walk', -30)
+}
+
+// Enemies spawn dormant (frozen on frame 0) and only start walking once they
+// scroll into view, exactly like the original. Otherwise every enemy walks off
+// the world / into the pits at t=0 and is gone long before Mario reaches it.
+function spawnEnemy (game, x, texture, walkAnim, walkSpeed) {
   const enemy = game.enemies
-    .create(x, GROUND_Y, 'koopa')
+    .create(x, GROUND_Y, texture)
     .setOrigin(0, 1)
     .setGravityY(300)
-    .setVelocityX(-30)
+    .setVelocityX(0)
     .setDepth(4)
 
-  enemy.enemyType = 'koopa'
-  enemy.anims.play('koopa-walk', true)
+  enemy.enemyType = texture
+  enemy.walkAnim = walkAnim
+  enemy.walkSpeed = walkSpeed
+  enemy.activated = false
+  enemy.setFrame(0)
   return enemy
+}
+
+// Wake enemies as the camera reaches them so they patrol on-screen, not before.
+function activateEnemies (game) {
+  if (!game.enemies) return
+
+  const activationEdge = game.cameras.main.scrollX + GAME_WIDTH
+
+  game.enemies.getChildren().forEach((enemy) => {
+    if (enemy.activated || enemy.isDead) return
+    if (enemy.x <= activationEdge) {
+      enemy.activated = true
+      enemy.anims.play(enemy.walkAnim, true)
+      enemy.setVelocityX(enemy.walkSpeed)
+      enemy.flipX = enemy.walkSpeed > 0
+    }
+  })
 }
 
 function createFlagAndCastle (game) {
@@ -1145,9 +1166,12 @@ function update () {
   checkHeadBlockHits(this)
   checkWarpPipe(this)
   checkFlag(this)
+  activateEnemies(this)
   cleanupFallenEnemies(this)
 
-  if (!this.levelComplete && mario.y >= GAME_HEIGHT + 32) {
+  // Falling into a pit kills Mario the moment he drops below the ground, so the
+  // death sprite shows during the fall (not a walking pose).
+  if (!this.levelComplete && !mario.isDead && !mario.isBlocked && mario.y > GROUND_Y + 4) {
     killMario(this)
   }
 }
@@ -1168,18 +1192,38 @@ function killMario (game) {
   mario.isDead = true
   mario.anims.play('mario-dead')
   mario.setCollideWorldBounds(false)
-
-  playAudio('gameover', game, { volume: 0.05 })
-
   mario.body.checkCollision.none = true
   mario.setVelocityX(0)
 
-  game.time.delayedCall(100, () => {
-    mario.setVelocityY(-250)
+  playAudio('gameover', game, { volume: 0.05 })
+
+  // The whole scene freezes during the death, like the original
+  freezeEnemies(game)
+
+  // If Mario fell into a pit (below the ground) he just keeps dropping in the
+  // death pose — no hop. Otherwise: hold the death pose, then hop up and fall.
+  if (mario.y > GROUND_Y) {
+    game.time.delayedCall(1400, () => loseLife(game))
+    return
+  }
+
+  mario.setVelocityY(0)
+  mario.body.allowGravity = false
+
+  game.time.delayedCall(500, () => {
+    mario.body.allowGravity = true
+    mario.setVelocityY(-300)
   })
 
-  game.time.delayedCall(1400, () => {
-    loseLife(game)
+  game.time.delayedCall(1900, () => loseLife(game))
+}
+
+function freezeEnemies (game) {
+  if (!game.enemies) return
+
+  game.enemies.getChildren().forEach((enemy) => {
+    if (enemy.body) enemy.setVelocity(0, 0)
+    if (enemy.anims) enemy.anims.pause()
   })
 }
 
