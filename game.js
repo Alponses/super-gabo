@@ -214,7 +214,10 @@ function resetTouchControls () {
 }
 
 function createLevel (game) {
-  game.physics.world.setBounds(0, 0, WORLD_WIDTH, GAME_HEIGHT)
+  // Bounds collide on every side except the bottom (last arg = false) so Mario
+  // can fall through the floor gaps into the kill zone — otherwise he gets
+  // pinned at the world floor and never dies in a pit.
+  game.physics.world.setBounds(0, 0, WORLD_WIDTH, GAME_HEIGHT, true, true, true, false)
 
   createScenery(game)
   createFloor(game)
