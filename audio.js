@@ -22,6 +22,10 @@ const INIT_AUDIOS = [
   {
     key: 'break-block',
     path: 'assets/sound/effects/break-block.wav'
+  },
+  {
+    key: 'powerdown',
+    path: 'assets/sound/effects/powerdown.mp3'
   }
 ]
 
