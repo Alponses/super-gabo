@@ -214,7 +214,10 @@ function resetTouchControls () {
 }
 
 function createLevel (game) {
-  game.physics.world.setBounds(0, 0, WORLD_WIDTH, GAME_HEIGHT)
+  // Bounds collide on every side except the bottom (last arg = false) so Mario
+  // can fall through the floor gaps into the kill zone — otherwise he gets
+  // pinned at the world floor and never dies in a pit.
+  game.physics.world.setBounds(0, 0, WORLD_WIDTH, GAME_HEIGHT, true, true, true, false)
 
   createScenery(game)
   createFloor(game)
@@ -465,21 +468,28 @@ function createCoin (game, x, y) {
 function createEnemies (game) {
   game.enemies = game.physics.add.group()
 
-  // Goombas spread across the level
+  // 16 Goombas spread across the level, matching SMB 1-1.
+  // All spawn on flat ground, clear of the pipes (29/38/46/57),
+  // the floor pits (70-71 / 87-89) and the staircases.
   addGoomba(game, tileX(22))
+  addGoomba(game, tileX(34))
   addGoomba(game, tileX(40))
   addGoomba(game, tileX(51))
   addGoomba(game, tileX(53))
+  addGoomba(game, tileX(60))
+  addGoomba(game, tileX(67))
   addGoomba(game, tileX(80))
   addGoomba(game, tileX(82))
   addGoomba(game, tileX(97))
+  addGoomba(game, tileX(117))
   addGoomba(game, tileX(125))
   addGoomba(game, tileX(127))
+  addGoomba(game, tileX(147))
   addGoomba(game, tileX(160))
+  addGoomba(game, tileX(174))
 
-  // Koopa Troopas
+  // A single green Koopa Troopa, like the original level
   addKoopa(game, tileX(100))
-  addKoopa(game, tileX(150))
 }
 
 function addGoomba (game, x) {
@@ -569,7 +579,7 @@ function createColliders (game) {
   game.physics.add.collider(game.powerups, game.questionBlocks)
   game.physics.add.collider(game.powerups, game.pipes)
   game.physics.add.collider(game.powerups, game.platforms)
-  game.physics.add.collider(game.mario, game.enemies, onHitEnemy, null, game)
+  game.physics.add.collider(game.mario, game.enemies, onHitEnemy, processHitEnemy, game)
   game.physics.add.overlap(game.mario, game.collectibles, collectItem, null, game)
   game.physics.add.overlap(game.mario, game.powerups, collectItem, null, game)
 }
@@ -641,7 +651,28 @@ function addCoinToState (game, origin) {
   updateHud(game)
 }
 
+// Switch Mario to his grown form. setTexture MUST run before setDisplaySize:
+// the grown sheet has 18x32 frames, so the scale stays 1:1 and the grown
+// animations render at the right height (otherwise the sprite ends up
+// double-stretched once a 'mario-grown-*' frame plays).
+function setMarioGrown (player) {
+  player.isGrown = true
+  player.setTexture('mario-grown')
+  player.setDisplaySize(18, 32)
+  player.body.setSize(18, 32)
+}
+
+// Revert Mario to his small form, keeping his feet on the ground (origin 0,1).
+function setMarioSmall (player) {
+  player.isGrown = false
+  player.setTexture('mario')
+  player.setDisplaySize(18, 16)
+  player.body.setSize(18, 16)
+}
+
 function growPlayer (game, player) {
+  if (player.isGrown) return
+
   game.physics.world.pause()
   game.anims.pauseAll()
 
@@ -660,14 +691,47 @@ function growPlayer (game, player) {
   player.isGrown = true
 
   setTimeout(() => {
-    player.setDisplaySize(18, 32)
-    player.body.setSize(18, 32)
+    setMarioGrown(player)
 
     game.anims.resumeAll()
     player.isBlocked = false
     clearInterval(interval)
     game.physics.world.resume()
   }, 1000)
+}
+
+// Big Mario takes a hit: shrink back to small instead of dying, then flash
+// briefly while intangible so the same enemy can't immediately finish him off.
+function shrinkPlayer (game, player) {
+  setMarioSmall(player)
+  player.isInvincible = true
+
+  playAudio('powerdown', game, { volume: 0.2 })
+
+  const blink = game.tweens.add({
+    targets: player,
+    alpha: 0.3,
+    duration: 90,
+    yoyo: true,
+    repeat: -1
+  })
+
+  game.time.delayedCall(1500, () => {
+    blink.stop()
+    player.alpha = 1
+    player.isInvincible = false
+  })
+}
+
+// Central damage handler: grown Mario shrinks, small Mario dies.
+function hurtMario (game, player) {
+  if (player.isDead || player.isInvincible || player.isBlocked) return
+
+  if (player.isGrown) {
+    shrinkPlayer(game, player)
+  } else {
+    killMario(game)
+  }
 }
 
 function hitQuestionBlock (mario, block) {
@@ -948,7 +1012,7 @@ function onHitEnemy (mario, enemy) {
   const stomped = mario.body.touching.down && enemy.body.touching.up
 
   if (!stomped) {
-    killMario(this)
+    hurtMario(this, mario)
     return
   }
 
@@ -975,6 +1039,13 @@ function onHitEnemy (mario, enemy) {
   this.time.delayedCall(400, () => {
     enemy.destroy()
   })
+}
+
+// Process callback for the Mario/enemy collider: while Mario is flashing after
+// a power-down he is intangible, so skip the collision entirely (he passes
+// through enemies just like in the original game).
+function processHitEnemy (mario, enemy) {
+  return !mario.isInvincible
 }
 
 function handleShellHit (game, mario, shell) {
@@ -1006,7 +1077,7 @@ function handleShellHit (game, mario, shell) {
     (shell.body.velocity.x > 0 && shell.body.center.x < mario.body.center.x) ||
     (shell.body.velocity.x < 0 && shell.body.center.x > mario.body.center.x)
 
-  if (towardMario) killMario(game)
+  if (towardMario) hurtMario(game, mario)
 }
 
 // Reverse an enemy's direction when it bumps a wall (pipe, block, stair).
@@ -1353,9 +1424,7 @@ function createUnderground () {
     .setDepth(5)
 
   if (gameState.warpMarioGrown) {
-    this.mario.setDisplaySize(18, 32)
-    this.mario.body.setSize(18, 32)
-    this.mario.isGrown = true
+    setMarioGrown(this.mario)
   }
 
   this.physics.add.collider(this.mario, this.solids)
