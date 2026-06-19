@@ -490,34 +490,53 @@ function createEnemies (game) {
   addGoomba(game, tileX(160))
   addGoomba(game, tileX(174))
 
-  // A single green Koopa Troopa, like the original level
+  // Two green Koopa Troopas
   addKoopa(game, tileX(100))
+  addKoopa(game, tileX(150))
 }
 
 function addGoomba (game, x) {
-  const enemy = game.enemies
-    .create(x, GROUND_Y, 'goomba')
-    .setOrigin(0, 1)
-    .setGravityY(300)
-    .setVelocityX(-35)
-    .setDepth(4)
-
-  enemy.enemyType = 'goomba'
-  enemy.anims.play('goomba-walk', true)
-  return enemy
+  return spawnEnemy(game, x, 'goomba', 'goomba-walk', -35)
 }
 
 function addKoopa (game, x) {
+  return spawnEnemy(game, x, 'koopa', 'koopa-walk', -30)
+}
+
+// Enemies spawn dormant (frozen on frame 0) and only start walking once they
+// scroll into view, exactly like the original. Otherwise every enemy walks off
+// the world / into the pits at t=0 and is gone long before Mario reaches it.
+function spawnEnemy (game, x, texture, walkAnim, walkSpeed) {
   const enemy = game.enemies
-    .create(x, GROUND_Y, 'koopa')
+    .create(x, GROUND_Y, texture)
     .setOrigin(0, 1)
     .setGravityY(300)
-    .setVelocityX(-30)
+    .setVelocityX(0)
     .setDepth(4)
 
-  enemy.enemyType = 'koopa'
-  enemy.anims.play('koopa-walk', true)
+  enemy.enemyType = texture
+  enemy.walkAnim = walkAnim
+  enemy.walkSpeed = walkSpeed
+  enemy.activated = false
+  enemy.setFrame(0)
   return enemy
+}
+
+// Wake enemies as the camera reaches them so they patrol on-screen, not before.
+function activateEnemies (game) {
+  if (!game.enemies) return
+
+  const activationEdge = game.cameras.main.scrollX + GAME_WIDTH
+
+  game.enemies.getChildren().forEach((enemy) => {
+    if (enemy.activated || enemy.isDead) return
+    if (enemy.x <= activationEdge) {
+      enemy.activated = true
+      enemy.anims.play(enemy.walkAnim, true)
+      enemy.setVelocityX(enemy.walkSpeed)
+      enemy.flipX = enemy.walkSpeed > 0
+    }
+  })
 }
 
 function createFlagAndCastle (game) {
@@ -1147,9 +1166,12 @@ function update () {
   checkHeadBlockHits(this)
   checkWarpPipe(this)
   checkFlag(this)
+  activateEnemies(this)
   cleanupFallenEnemies(this)
 
-  if (!this.levelComplete && mario.y >= GAME_HEIGHT + 32) {
+  // Falling into a pit kills Mario the moment he drops below the ground, so the
+  // death sprite shows during the fall (not a walking pose).
+  if (!this.levelComplete && !mario.isDead && !mario.isBlocked && mario.y > GROUND_Y + 4) {
     killMario(this)
   }
 }
@@ -1178,9 +1200,9 @@ function killMario (game) {
   // The whole scene freezes during the death, like the original
   freezeEnemies(game)
 
-  // If Mario already dropped off the bottom of the screen (a pit), he just keeps
-  // falling — no hop. Otherwise: hold the death pose, then hop up and fall through.
-  if (mario.y >= GAME_HEIGHT) {
+  // If Mario fell into a pit (below the ground) he just keeps dropping in the
+  // death pose — no hop. Otherwise: hold the death pose, then hop up and fall.
+  if (mario.y > GROUND_Y) {
     game.time.delayedCall(1400, () => loseLife(game))
     return
   }
